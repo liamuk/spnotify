@@ -1,0 +1,82 @@
+#!/bin/python
+import sys
+import dbus
+
+import os
+import time
+import urllib.request
+from gi.repository import Notify
+
+SLEEP_INTERVAL = 1
+
+bus = dbus.Bus(dbus.Bus.TYPE_SESSION)
+try:
+    spotify = bus.get_object('com.spotify.qt', '/')
+except dbus.exceptions.DBusException:
+    print("Unable to communicate with Spotify via DBus. Make sure Spotify is running.")
+    exit(1)
+Notify.init("Spnotify")
+
+def get_track_info():
+    try:
+        response = spotify.get_dbus_method('GetMetadata', 'org.freedesktop.MediaPlayer2')()
+    except dbus.exceptions.DBusException:
+        print("Spotify is no longer running, Spnotify exiting...")
+        exit(0)
+    if response == {}:
+        print("Spotify is no longer running, Spnotify exiting...")
+        exit(0)
+    
+    track_info = {}
+    for key in response:
+        raw_value = response[key]
+        if isinstance(raw_value, list):
+            value = ", ".join(raw_value)
+        elif not isinstance(raw_value, str):
+            value = str(raw_value)
+        else:
+            value = raw_value
+        track_info[key] = value
+    return track_info
+
+def notify_track_info(track_info):
+    title = track_info["xesam:title"]
+    message = "by %s\n" % track_info["xesam:artist"] + "from %s" % track_info["xesam:album"]
+    icon = "/tmp/spotify_albumcover"
+    
+    urllib.request.urlretrieve(track_info["mpris:artUrl"], icon)
+    n = Notify.Notification.new(title, message, icon)
+    n.show() 
+    os.remove(icon)
+
+def print_usage(track_info):
+    print("usage:",sys.argv[0],"[options] [query]")
+    print("")
+    print("Queries:")
+    for key in track_info:
+        print("  ",key)
+    print("")
+    print("Options:")
+    print("  ","-d","        ","Run as a notification service daemon for Spotify")
+    print("  ","-n","        ","Print a single notification, then exit")
+
+track_info = get_track_info()
+if len(sys.argv) < 2:
+    print_usage(track_info)
+    exit(1)
+elif sys.argv[1] == '-n':
+    notify_track_info(track_info)
+    exit(0)
+elif sys.argv[1] == '-d':
+    while 1:
+        current_track_info = get_track_info()
+        if current_track_info != track_info:
+            notify_track_info(current_track_info)
+            track_info = current_track_info
+        time.sleep(SLEEP_INTERVAL)
+elif sys.argv[1] in track_info:
+    print(track_info[sys.argv[1]])
+    exit(0)
+else:
+    print_usage(track_info)
+    exit(1)
